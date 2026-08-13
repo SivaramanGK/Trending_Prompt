@@ -1,0 +1,5 @@
+# EDIT ME: replace with your real GitHub Pages URL
+Sitemap: https://sivaramangk.github.io/Trending_Prompt/#trending/sitemap.xml
+
+User-agent: *
+Allow: /
