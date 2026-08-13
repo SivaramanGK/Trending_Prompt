@@ -438,7 +438,7 @@
         <span class="tag mono">Live from the sheet</span>
         <h2>Trending this week.</h2>
       </div>
-      <p>Pulled straight from <code>Data/prompts.xlsx</code> — mark a row Trending in the sheet and it shows up here automatically.</p>
+      <p>Pulled straight from <code>data/prompts.xlsx</code> — mark a row Trending in the sheet and it shows up here automatically.</p>
     </div>
     <div class="prompt-grid" id="trending-grid">
       <div class="trending-status mono" style="grid-column:1/-1; font-size:12px; color:rgba(36,16,25,0.5);">Loading trending prompts…</div>
@@ -696,6 +696,20 @@
 
     const palette = ['#e7bfba,#c9a24b', '#c9a24b,#34182a', '#a83d4c,#6d2536', '#e3c988,#a83d4c', '#34182a,#e7bfba', '#f7efe4,#c9a24b'];
 
+    // Tries several likely image-folder names in turn (GitHub folder names
+    // are case- and spelling-sensitive), then falls back to a color card.
+    window.__imageFolders = ['images', 'Images', 'image', 'Image'];
+    window.tryNextImageFolder = function(imgEl, filename, gradient){
+      const idx = parseInt(imgEl.dataset.folderIdx || '0', 10) + 1;
+      if (idx < window.__imageFolders.length){
+        imgEl.dataset.folderIdx = idx;
+        imgEl.src = window.__imageFolders[idx] + '/' + filename;
+      } else {
+        imgEl.remove();
+        if (imgEl.parentElement) imgEl.parentElement.style.background = 'linear-gradient(150deg, ' + gradient + ' 70%)';
+      }
+    };
+
     function escapeHtml(str){
       return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
     }
@@ -724,9 +738,13 @@
         const img = String(r['Image Filename'] || '').trim();
         const grad = palette[i % palette.length];
 
+        // GitHub folder names are case- and spelling-sensitive, so try a
+        // few likely folder names (images / Images / image / Image) before
+        // falling back to a plain color card.
+        const imgAttr = escapeAttr(img).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const visual = img
-          ? `<img src="images/${escapeAttr(img)}" alt="${escapeAttr(title)}" loading="lazy"
-               onerror="this.remove(); this.parentElement.style.background='linear-gradient(150deg, ${grad} 70%)';">`
+          ? `<img src="images/${escapeAttr(img)}" alt="${escapeAttr(title)}" loading="lazy" data-folder-idx="0"
+               onerror="tryNextImageFolder(this, '${imgAttr}', '${grad}')">`
           : '';
         const visualStyle = img ? '' : `style="background:linear-gradient(150deg, ${grad} 70%)"`;
 
@@ -765,20 +783,53 @@
       });
     }
 
-    fetch('Data/prompts.xlsx')
-      .then(res => {
-        if (!res.ok) throw new Error('prompts.xlsx not found');
-        return res.arrayBuffer();
-      })
-      .then(buf => {
+    // GitHub Pages URLs are case-sensitive, so try a few likely spellings
+    // of the folder/file name before giving up.
+    const candidatePaths = [
+      'data/prompts.xlsx',
+      'Data/prompts.xlsx',
+      'data/Prompts.xlsx',
+      'Data/Prompts.xlsx'
+    ];
+
+    async function loadFirstAvailable(paths){
+      const attempts = [];
+      for (const path of paths){
+        try {
+          const res = await fetch(path, { cache: 'no-store' });
+          attempts.push(path + ' → HTTP ' + res.status);
+          if (res.ok) return { buf: await res.arrayBuffer(), path, attempts };
+        } catch (e) {
+          attempts.push(path + ' → ' + e.message);
+        }
+      }
+      const err = new Error('none of the file paths worked');
+      err.attempts = attempts;
+      throw err;
+    }
+
+    loadFirstAvailable(candidatePaths)
+      .then(({ buf, path, attempts }) => {
+        console.log('[Trending] loaded workbook from:', path);
         const wb = XLSX.read(buf, { type: 'array' });
+        console.log('[Trending] sheet tabs found:', wb.SheetNames);
         const sheetName = wb.SheetNames.includes('Trending Prompts') ? 'Trending Prompts' : wb.SheetNames[0];
         const sheet = wb.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        console.log('[Trending] rows parsed:', rows);
         renderRows(rows);
       })
       .catch(err => {
-        grid.innerHTML = `<div class="trending-status mono error" style="grid-column:1/-1; font-size:12px;">Couldn't load data/prompts.xlsx — make sure it's uploaded to the /data folder next to this page. (${escapeHtml(err.message)})</div>`;
+        const detail = (err.attempts || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
+        console.error('[Trending] failed to load prompts.xlsx', err);
+        grid.innerHTML = `
+          <div class="trending-status mono error" style="grid-column:1/-1; font-size:12px; line-height:1.7;">
+            Couldn't load prompts.xlsx. Tried these paths:
+            <ul style="margin:8px 0 0; padding-left:18px;">${detail}</ul>
+            Check: (1) the file is really at that path in your repo, (2) the sheet tab is
+            named exactly <b>Trending Prompts</b>, (3) it was committed to the <b>main</b> branch.
+            Open this page, press F12, and check the Console tab for more detail.
+          </div>`;
       });
   })();
 </script>
