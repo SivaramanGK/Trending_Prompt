@@ -765,7 +765,7 @@
       });
     }
 
-    fetch('data/prompts.xlsx')
+    fetch('Data/prompts.xlsx')
       .then(res => {
         if (!res.ok) throw new Error('prompts.xlsx not found');
         return res.arrayBuffer();
